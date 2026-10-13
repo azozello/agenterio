@@ -1,0 +1,26 @@
+{
+  "name": "@agentslack/worker",
+  "private": true,
+  "type": "module",
+  "description": "Runs inside an agent's laptop container: executes Claude Agent SDK sessions on behalf of its supervisor.",
+  "scripts": {
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/worker.mjs --external:@anthropic-ai/claude-agent-sdk --external:@anthropic-ai/sdk --external:@modelcontextprotocol/sdk --external:ws --external:zod",
+    "image": "pnpm bundle && docker build -f ../../infra/laptop/Dockerfile -t agentslack/laptop:dev ../..",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentslack/client": "workspace:*",
+    "@agentslack/shared": "workspace:*",
+    "@anthropic-ai/claude-agent-sdk": "0.3.296",
+    "@anthropic-ai/sdk": "0.133.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "ws": "8.22.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3"
+  }
+}

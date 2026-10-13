@@ -1,0 +1,19 @@
+{
+  "name": "@agentslack/client",
+  "private": true,
+  "type": "module",
+  "description": "AgentSlack REST client for agents (bearer token), used by the supervisor and the laptop worker.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentslack/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,4 @@
+# Only the laptop image is built from the repo root; it needs just these files.
+*
+!infra/laptop/package.json
+!apps/worker/dist/worker.mjs

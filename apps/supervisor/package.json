@@ -1,0 +1,27 @@
+{
+  "name": "@agentslack/supervisor",
+  "private": true,
+  "type": "module",
+  "description": "Runs each agent's loop on the host: drains its inbox, picks up tasks, and drives the worker in its laptop.",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentslack/client": "workspace:*",
+    "@agentslack/shared": "workspace:*",
+    "dockerode": "4.0.12",
+    "socket.io-client": "4.8.4",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "4.0.2",
+    "@types/node": "^24",
+    "@types/ws": "8.18.2",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

@@ -1,0 +1,566 @@
+// AgentSlack data model. See specs/ "Data model" for the table list.
+// Messages, task comments and spec comments share the `message` table (target_type / target_id).
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ActorKind {
+  human
+  agent
+  system
+}
+
+enum AgentStatus {
+  idle
+  working
+  blocked
+  offline
+}
+
+enum LaptopState {
+  provisioning
+  ready
+  suspended
+  destroyed
+}
+
+enum TaskType {
+  feature
+  task
+  bug
+}
+
+enum TaskStatus {
+  backlog
+  in_progress
+  blocked
+  ready
+  in_review
+  done
+}
+
+enum TaskPriority {
+  P0
+  P1
+  P2
+  P3
+}
+
+enum Estimate {
+  S
+  M
+  L
+}
+
+enum TaskLinkKind {
+  pr
+  spec
+  bug
+}
+
+enum MergePolicy {
+  human_gate
+  agent_merge
+  hybrid
+}
+
+enum ChannelKind {
+  channel
+  dm
+}
+
+enum MessageTarget {
+  channel
+  task
+  spec_page
+}
+
+enum SkillVisibility {
+  private
+  workspace
+}
+
+enum InboxKind {
+  mention
+  dm
+  thread_reply
+  task_assigned
+  task_unblocked
+}
+
+model Workspace {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users          User[]
+  roles          Role[]
+  agents         Agent[]
+  projects       Project[]
+  channels       Channel[]
+  images         Image[]
+  accessProfiles AccessProfile[]
+  skills         Skill[]
+  events         Event[]
+
+  @@map("workspace")
+}
+
+model User {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  email        String   @unique
+  name         String
+  passwordHash String   @map("password_hash")
+  isAdmin      Boolean  @default(false) @map("is_admin")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id])
+  sessions        Session[]
+  memberships     ProjectMember[]
+  channelMembers  ChannelMember[]
+  messages        Message[]
+  assignedTasks   Task[]           @relation("TaskAssigneeUser")
+  specVersions    SpecVersion[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Role {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  name           String
+  basePrompt     String   @default("") @map("base_prompt")
+  defaultSkills  String[] @default([]) @map("default_skills")
+  defaultImageId String?  @map("default_image_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  defaultImage Image?    @relation(fields: [defaultImageId], references: [id])
+  agents       Agent[]
+  skills       Skill[]
+
+  @@unique([workspaceId, name])
+  @@map("role")
+}
+
+model Agent {
+  id               String      @id @default(uuid(7)) @db.Uuid
+  workspaceId      String      @map("workspace_id") @db.Uuid
+  roleId           String      @map("role_id") @db.Uuid
+  name             String
+  // Used for @mentions; unique per workspace.
+  handle           String
+  avatar           String?
+  model            String      @default("claude-opus-5-5")
+  effort           String      @default("high")
+  systemPrompt     String      @default("") @map("system_prompt")
+  status           AgentStatus @default(offline)
+  statusText       String      @default("") @map("status_text")
+  currentProjectId String?     @map("current_project_id") @db.Uuid
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id])
+  role           Role            @relation(fields: [roleId], references: [id])
+  currentProject Project?        @relation("AgentCurrentProject", fields: [currentProjectId], references: [id])
+  tokens         AgentToken[]
+  laptops        Laptop[]
+  memberships    ProjectMember[]
+  channelMembers ChannelMember[]
+  messages       Message[]
+  assignedTasks  Task[]          @relation("TaskAssigneeAgent")
+  skills         Skill[]
+  specVersions   SpecVersion[]
+  inboxItems     InboxItem[]
+
+  @@unique([workspaceId, handle])
+  @@map("agent")
+}
+
+// Per-agent API token, scoped to the project the agent was on when it was issued.
+model AgentToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  agentId   String    @map("agent_id") @db.Uuid
+  projectId String    @map("project_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("agent_token")
+}
+
+model Project {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  workspaceId     String      @map("workspace_id") @db.Uuid
+  // Task key prefix, e.g. "AUTH" for AUTH-14.
+  key             String
+  name            String
+  repos           String[]    @default([])
+  imageId         String?     @map("image_id") @db.Uuid
+  accessProfileId String?     @map("access_profile_id") @db.Uuid
+  mergePolicy     MergePolicy @default(human_gate) @map("merge_policy")
+  taskCounter     Int         @default(0) @map("task_counter")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id])
+  image           Image?          @relation(fields: [imageId], references: [id])
+  accessProfile   AccessProfile?  @relation(fields: [accessProfileId], references: [id])
+  members         ProjectMember[]
+  currentAgents   Agent[]         @relation("AgentCurrentProject")
+  agentTokens     AgentToken[]
+  channels        Channel[]
+  tasks           Task[]
+  specPages       SpecPage[]
+  laptops         Laptop[]
+
+  @@unique([workspaceId, key])
+  @@map("project")
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  agentId   String?  @map("agent_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent   Agent?  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@unique([projectId, agentId])
+  @@map("project_member")
+}
+
+model Image {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  name        String
+  // Dockerfile build ref or VM image reference.
+  ref         String
+  version     String
+  manifest    Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  projects  Project[]
+  roles     Role[]
+
+  @@map("image")
+}
+
+model AccessProfile {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  name        String
+  // [{ name: "GITHUB_TOKEN", scope: {...} }] — names only, never values.
+  credentials Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  projects  Project[]
+
+  @@map("access_profile")
+}
+
+model Laptop {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  agentId         String      @map("agent_id") @db.Uuid
+  projectId       String      @map("project_id") @db.Uuid
+  imageRef        String      @map("image_ref")
+  state           LaptopState @default(provisioning)
+  containerId     String?     @map("container_id")
+  costToDateCents Int         @default(0) @map("cost_to_date_cents")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  destroyedAt     DateTime?   @map("destroyed_at")
+
+  agent   Agent   @relation(fields: [agentId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@map("laptop")
+}
+
+model Channel {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  workspaceId String      @map("workspace_id") @db.Uuid
+  // Null for workspace-level channels such as #announcements.
+  projectId   String?     @map("project_id") @db.Uuid
+  name        String
+  kind        ChannelKind @default(channel)
+  topic       String      @default("")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id])
+  project   Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  members   ChannelMember[]
+
+  @@unique([workspaceId, projectId, name])
+  @@map("channel")
+}
+
+// Explicit membership, used for DMs. Project channels are open to all project members.
+model ChannelMember {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  channelId String   @map("channel_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  agentId   String?  @map("agent_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent   Agent?  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@unique([channelId, agentId])
+  @@map("channel_member")
+}
+
+model Message {
+  id            String        @id @default(uuid(7)) @db.Uuid
+  workspaceId   String        @map("workspace_id") @db.Uuid
+  targetType    MessageTarget @map("target_type")
+  targetId      String        @map("target_id") @db.Uuid
+  // Thread root; null for top-level messages.
+  parentId      String?       @map("parent_id") @db.Uuid
+  // Both null: a system message.
+  authorUserId  String?       @map("author_user_id") @db.Uuid
+  authorAgentId String?       @map("author_agent_id") @db.Uuid
+  body          String
+  // Auto-generated activity line (status change, assignment). Never delivered to inboxes.
+  isActivity    Boolean       @default(false) @map("is_activity")
+  // Set on the thread root that represents a task in #general.
+  taskId        String?       @map("task_id") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at")
+  editedAt      DateTime?     @map("edited_at")
+
+  parent      Message?    @relation("Thread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Message[]   @relation("Thread")
+  authorUser  User?       @relation(fields: [authorUserId], references: [id])
+  authorAgent Agent?      @relation(fields: [authorAgentId], references: [id])
+  task        Task?       @relation("TaskRootMessage", fields: [taskId], references: [id], onDelete: SetNull)
+  inboxItems  InboxItem[]
+
+  @@index([targetType, targetId, createdAt])
+  @@index([parentId, createdAt])
+  @@map("message")
+}
+
+model Task {
+  id              String       @id @default(uuid(7)) @db.Uuid
+  projectId       String       @map("project_id") @db.Uuid
+  number          Int
+  type            TaskType
+  title           String
+  description     String       @default("")
+  status          TaskStatus   @default(backlog)
+  priority        TaskPriority @default(P2)
+  estimate        Estimate?
+  labels          String[]     @default([])
+  // Backlog order; lower comes first.
+  rank            Float        @default(0)
+  // The feature a task or bug belongs to.
+  parentId        String?      @map("parent_id") @db.Uuid
+  assigneeUserId  String?      @map("assignee_user_id") @db.Uuid
+  assigneeAgentId String?      @map("assignee_agent_id") @db.Uuid
+  reporterUserId  String?      @map("reporter_user_id") @db.Uuid
+  reporterAgentId String?      @map("reporter_agent_id") @db.Uuid
+  // Thread root in the project's #general; status changes and comments are its replies.
+  threadMessageId String?      @unique @map("thread_message_id") @db.Uuid
+  // Git branch the assignee works on.
+  branch          String?
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rootMessages  Message[]        @relation("TaskRootMessage")
+  inboxItems    InboxItem[]
+  parent        Task?            @relation("FeatureChildren", fields: [parentId], references: [id])
+  children      Task[]           @relation("FeatureChildren")
+  assigneeUser  User?            @relation("TaskAssigneeUser", fields: [assigneeUserId], references: [id])
+  assigneeAgent Agent?           @relation("TaskAssigneeAgent", fields: [assigneeAgentId], references: [id])
+  dependsOn     TaskDependency[] @relation("DependentTask")
+  dependents    TaskDependency[] @relation("DependencyTask")
+  links         TaskLink[]       @relation("LinkOwner")
+  linkedFrom    TaskLink[]       @relation("LinkedBug")
+
+  @@unique([projectId, number])
+  @@index([projectId, status])
+  @@map("task")
+}
+
+model TaskDependency {
+  taskId      String @map("task_id") @db.Uuid
+  dependsOnId String @map("depends_on_id") @db.Uuid
+
+  task      Task @relation("DependentTask", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("DependencyTask", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, dependsOnId])
+  @@map("task_dependency")
+}
+
+model TaskLink {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  taskId     String       @map("task_id") @db.Uuid
+  kind       TaskLinkKind
+  // PR URL for kind = pr.
+  url        String?
+  // Last PR state seen by the poller: open | draft | closed | merged.
+  state      String?
+  specPageId String?      @map("spec_page_id") @db.Uuid
+  bugTaskId  String?      @map("bug_task_id") @db.Uuid
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  task     Task      @relation("LinkOwner", fields: [taskId], references: [id], onDelete: Cascade)
+  specPage SpecPage? @relation(fields: [specPageId], references: [id], onDelete: Cascade)
+  bugTask  Task?     @relation("LinkedBug", fields: [bugTaskId], references: [id], onDelete: Cascade)
+
+  @@map("task_link")
+}
+
+model SpecPage {
+  id             String                       @id @default(uuid(7)) @db.Uuid
+  projectId      String                       @map("project_id") @db.Uuid
+  parentId       String?                      @map("parent_id") @db.Uuid
+  title          String
+  slug           String
+  body           String                       @default("")
+  currentVersion Int                          @default(1) @map("current_version")
+  // bge-m3 embedding, filled from M3.
+  embedding      Unsupported("vector(1024)")?
+  createdAt      DateTime                     @default(now()) @map("created_at")
+  updatedAt      DateTime                     @updatedAt @map("updated_at")
+
+  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent   SpecPage?     @relation("PageTree", fields: [parentId], references: [id])
+  children SpecPage[]    @relation("PageTree")
+  versions SpecVersion[]
+  links    TaskLink[]
+
+  @@unique([projectId, slug])
+  @@map("spec_page")
+}
+
+model SpecVersion {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  pageId        String   @map("page_id") @db.Uuid
+  version       Int
+  body          String
+  authorUserId  String?  @map("author_user_id") @db.Uuid
+  authorAgentId String?  @map("author_agent_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  page        SpecPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  authorUser  User?    @relation(fields: [authorUserId], references: [id])
+  authorAgent Agent?   @relation(fields: [authorAgentId], references: [id])
+
+  @@unique([pageId, version])
+  @@map("spec_version")
+}
+
+model Skill {
+  id             String                       @id @default(uuid(7)) @db.Uuid
+  workspaceId    String                       @map("workspace_id") @db.Uuid
+  // Author; private skills belong to it.
+  ownerAgentId   String?                      @map("owner_agent_id") @db.Uuid
+  // Role that inherits a promoted skill.
+  roleId         String?                      @map("role_id") @db.Uuid
+  visibility     SkillVisibility              @default(private)
+  name           String
+  trigger        String
+  body           String
+  originTaskId   String?                      @map("origin_task_id") @db.Uuid
+  usageCount     Int                          @default(0) @map("usage_count")
+  lastUsedAt     DateTime?                    @map("last_used_at")
+  currentVersion Int                          @default(1) @map("current_version")
+  embedding      Unsupported("vector(1024)")?
+  createdAt      DateTime                     @default(now()) @map("created_at")
+  updatedAt      DateTime                     @updatedAt @map("updated_at")
+
+  workspace  Workspace      @relation(fields: [workspaceId], references: [id])
+  ownerAgent Agent?         @relation(fields: [ownerAgentId], references: [id])
+  role       Role?          @relation(fields: [roleId], references: [id])
+  versions   SkillVersion[]
+
+  @@map("skill")
+}
+
+model SkillVersion {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  skillId   String   @map("skill_id") @db.Uuid
+  version   Int
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, version])
+  @@map("skill_version")
+}
+
+// Append-only audit log; every write emits one. Also published to the event bus.
+model Event {
+  id           BigInt    @id @default(autoincrement())
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  type         String
+  actorKind    ActorKind @map("actor_kind")
+  actorUserId  String?   @map("actor_user_id") @db.Uuid
+  actorAgentId String?   @map("actor_agent_id") @db.Uuid
+  projectId    String?   @map("project_id") @db.Uuid
+  subjectType  String    @map("subject_type")
+  subjectId    String    @map("subject_id")
+  payload      Json
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([actorAgentId, createdAt])
+  @@map("event")
+}
+
+// Work delivered to an agent: mentions, DMs, replies in its threads, assignments.
+// The supervisor drains unhandled items on every loop tick.
+model InboxItem {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  agentId   String    @map("agent_id") @db.Uuid
+  kind      InboxKind
+  messageId String?   @map("message_id") @db.Uuid
+  taskId    String?   @map("task_id") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at")
+  handledAt DateTime? @map("handled_at")
+
+  agent   Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  message Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  task    Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, handledAt, createdAt])
+  @@map("inbox_item")
+}

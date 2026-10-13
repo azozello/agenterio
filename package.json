@@ -1,0 +1,26 @@
+{
+  "name": "agentslack",
+  "private": true,
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "db:migrate": "pnpm --filter @agentslack/db migrate:dev",
+    "db:deploy": "pnpm --filter @agentslack/db migrate:deploy",
+    "db:seed": "pnpm --filter @agentslack/api seed",
+    "bootstrap": "pnpm infra:up && pnpm db:deploy && pnpm db:seed",
+    "supervisor": "pnpm --filter @agentslack/supervisor start",
+    "laptop:build": "pnpm --filter @agentslack/worker image"
+  },
+  "devDependencies": {
+    "turbo": "2.11.8",
+    "typescript": "6.0.3"
+  }
+}
