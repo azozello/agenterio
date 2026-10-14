@@ -88,7 +88,7 @@ export function ChannelView({ channel, title, icon, subtitle, placeholder, empty
           const el = e.currentTarget;
           stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="min-h-0 flex-1 overflow-y-auto py-4"
+        className="relative min-h-0 flex-1 overflow-y-auto py-4"
         aria-live="polite"
         aria-label="Messages"
       >

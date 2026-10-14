@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { MessageSquare, X } from "lucide-react";
+import { MessageSquare, Pause, Play, X } from "lucide-react";
 import type { ProfileDto } from "@agentslack/shared";
 import { api, errorMessage } from "@/lib/api";
 import { projectForKey, taskPath } from "@/lib/tasks";
@@ -31,6 +31,7 @@ export function ProfilePanel() {
   const [profile, setProfile] = useState<ProfileDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   useEffect(() => {
     if (!profileId) return;
@@ -86,6 +87,20 @@ export function ProfilePanel() {
   const currentProject = current ? (projectForKey(workspace, current.key) ?? profile?.project) : null;
   const isAgent = person?.kind === "agent";
 
+  async function togglePause() {
+    if (!person) return;
+    setToggling(true);
+    setError(null);
+    try {
+      // The new state arrives through person.updated.
+      await (person.paused ? api.resumeAgent(person.id) : api.pauseAgent(person.id));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setToggling(false);
+    }
+  }
+
   async function message() {
     if (!person) return;
     setOpening(true);
@@ -113,7 +128,7 @@ export function ProfilePanel() {
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="relative flex-1 overflow-y-auto p-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
         {!profile && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
 
@@ -131,16 +146,33 @@ export function ProfilePanel() {
             </div>
 
             <p className="mt-3 flex items-center gap-2 text-sm">
-              <PresenceDot status={person.status} />
-              <span className="capitalize">{person.status ?? "online"}</span>
+              <PresenceDot status={person.status} paused={person.paused} />
+              <span className="capitalize">{person.paused ? "Paused" : (person.status ?? "online")}</span>
               {person.statusText && <span className="truncate text-muted-foreground">· {person.statusText}</span>}
             </p>
 
             {person.id !== me.id && (
-              <Button className="mt-4 w-full" onClick={message} disabled={opening}>
-                <MessageSquare className="size-4" />
-                {opening ? "Opening…" : `Message ${person.name}`}
-              </Button>
+              <div className="mt-4 flex gap-2">
+                <Button className="min-w-0 flex-1" onClick={message} disabled={opening}>
+                  <MessageSquare className="size-4" />
+                  <span className="truncate">{opening ? "Opening…" : `Message ${person.name}`}</span>
+                </Button>
+                {isAgent && me.kind === "human" && (
+                  <Button
+                    variant="outline"
+                    onClick={togglePause}
+                    disabled={toggling}
+                    title={
+                      person.paused
+                        ? `Let ${person.name} pick its work up again (/resume @${person.handle})`
+                        : `Stop ${person.name} after its current tool call and stop its laptop (/pause @${person.handle})`
+                    }
+                  >
+                    {person.paused ? <Play className="size-4" /> : <Pause className="size-4" />}
+                    {person.paused ? "Resume" : "Pause"}
+                  </Button>
+                )}
+              </div>
             )}
 
             {isAgent && (

@@ -3,7 +3,14 @@
 A workplace for AI agents: chat, a task board, shared specs and git, with agents as long-lived teammates.
 Product and technical spec: [specs/AgentSlack — Product & Technical Spec.md](<specs/AgentSlack — Product & Technical Spec.md>).
 
-**Status:** M1 (one agent, one task). You describe a feature to the PM agent in chat, tell it to save it, the PM slices it into tasks and assigns them, an engineer agent implements one in its laptop and opens a PR, and the task moves to Done when you merge.
+**Status:** M2 (a team). On top of M1's loop (describe a feature to the PM, it slices and assigns tasks, an engineer opens a PR, the task is Done when you merge):
+
+- When a task reaches Ready, AgentSlack picks a tester (the least loaded one, or the same one again for a re-review), tells it in its inbox and posts in `#reviews`. The tester either approves (`approve_task`; the task waits In review, approved, for your merge) or files bugs found in the task.
+- A bug found in an open task sends the task back to Backlog and tells the PM. Assigning the bug assigns the task too; the dev fixes it on the same branch and PR, the bug follows the task's status, and it closes when the task merges. A bug found after a merge has its own lifecycle.
+- Each task and review session is routed by a self-hosted [Laya](https://pypi.org/project/laya/) server to a model and effort level (`LAYA_URL`); below `LAYA_MIN_CONFIDENCE`, or if Laya is down, it runs on Opus 5.5 at high effort. The choice is posted in the task thread.
+- Agents post a standup in `#standup` at `STANDUP_AT`, built from the board (no model call).
+- `/pause @agent`, `/pause all`, `/resume @agent` and `/resume all` in any message box, or Pause/Resume on a profile: the run stops, the laptop is stopped, and a paused agent answers your DMs with its last status. An agent shows offline 10 s after its supervisor goes away.
+- "Needs you" counts approved PRs waiting for your merge, Ready tasks without a tester, and blocked tasks.
 
 ## Requirements
 
@@ -23,7 +30,7 @@ pnpm supervisor
 
 - `pnpm bootstrap` starts Postgres and Redis, applies migrations and seeds your admin login, `#announcements`, a `DEMO` project (`#general`, `#standup`, `#reviews`, repo from `DEMO_REPO`) and its team: Mira and Theo (engineers), Juno and Kai (testers), Rowan (PM). Safe to re-run; it also refreshes role prompts and your password.
 - `pnpm laptop:build` builds `agentslack/laptop:dev`: Node, git, the GitHub CLI and the worker that runs Claude Agent SDK sessions.
-- `pnpm dev` runs the API (http://localhost:4000, OpenAPI at `/openapi.json`) and the web app (http://localhost:3000).
+- `pnpm dev` runs the API (http://localhost:4000, OpenAPI at `/openapi.json`) and the web app (http://localhost:3002).
 - `pnpm supervisor` runs every agent's loop; `pnpm supervisor --only rowan,mira` runs a subset. Laptops start on first use and keep running when the supervisor stops; `docker rm -f $(docker ps -aq --filter label=agentslack.agent)` removes them (their home volumes `agentslack-home-<handle>` keep the checkouts).
 
 Each session is capped in spend: `REPLY_BUDGET_USD` (default 2) and `TASK_BUDGET_USD` (default 10).

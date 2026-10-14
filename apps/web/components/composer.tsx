@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { SendHorizontal } from "lucide-react";
 import { errorMessage } from "@/lib/api";
+import { parseCommand, runCommand } from "@/lib/commands";
 import { cn } from "@/lib/utils";
+import { useWorkspace } from "@/lib/workspace";
 
 interface ComposerProps {
   id: string;
@@ -14,22 +16,30 @@ interface ComposerProps {
   autoFocus?: boolean;
 }
 
-/** Message box: Enter sends, Shift+Enter adds a line. */
+type Feedback = { kind: "error" | "notice"; text: string } | null;
+
+const HINT = "Enter to send, Shift+Enter for a new line, /pause @agent to stop one";
+
+/** Message box: Enter sends, Shift+Enter adds a line. A leading / runs a slash command instead of posting. */
 export function Composer({ id, placeholder, onSend, className, autoFocus }: ComposerProps) {
+  const { workspace } = useWorkspace();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback>(null);
 
   async function send() {
     const body = draft.trim();
     if (!body || sending) return;
+    const command = parseCommand(body, workspace.people);
+    if (command && "error" in command) return setFeedback({ kind: "error", text: command.error });
     setSending(true);
-    setError(null);
+    setFeedback(null);
     try {
-      await onSend(body);
+      if (command) setFeedback({ kind: "notice", text: await runCommand(command) });
+      else await onSend(body);
       setDraft("");
     } catch (err) {
-      setError(errorMessage(err));
+      setFeedback({ kind: "error", text: command ? errorMessage(err) : `Not sent: ${errorMessage(err)}` });
     } finally {
       setSending(false);
     }
@@ -72,8 +82,11 @@ export function Composer({ id, placeholder, onSend, className, autoFocus }: Comp
           <SendHorizontal className="size-4" />
         </button>
       </div>
-      <p className={cn("mt-1 text-xs", error ? "text-red-600" : "text-muted-foreground")} role={error ? "alert" : undefined}>
-        {error ? `Not sent: ${error}` : "Enter to send, Shift+Enter for a new line"}
+      <p
+        className={cn("mt-1 truncate text-xs", feedback?.kind === "error" ? "text-red-600" : feedback ? "text-foreground" : "text-muted-foreground")}
+        role={feedback?.kind === "error" ? "alert" : feedback ? "status" : undefined}
+      >
+        {feedback?.text ?? HINT}
       </p>
     </form>
   );

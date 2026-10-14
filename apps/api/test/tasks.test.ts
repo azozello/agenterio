@@ -127,6 +127,7 @@ describe("lifecycle", () => {
       "Moved AAA-2: Backlog → In progress",
       "Linked PR https://github.com/acme/app/pull/7",
       "Moved AAA-2: In progress → Ready",
+      "Ready for review by Juno",
     ]);
     // Activity lines never land in inboxes.
     expect((await inboxOf("mira")).map((i) => i.kind)).toEqual(["task_assigned"]);

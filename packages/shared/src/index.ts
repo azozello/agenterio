@@ -80,6 +80,13 @@ export const TaskDto = z.object({
   children: z.array(TaskRefDto),
   /** Bugs filed against this task. */
   bugs: z.array(TaskRefDto),
+  /** For bugs: the task the bug was found in. While that task is open the bug is fixed on its branch and follows its status. */
+  foundIn: TaskRefDto.nullable(),
+  /** Tester reviewing the task; picked when it first reaches Ready and kept for re-reviews. */
+  reviewer: PersonRefDto.nullable(),
+  /** Set when the reviewer approved the current round; cleared when the task leaves In review. */
+  approvedBy: PersonRefDto.nullable(),
+  approvedAt: z.string().nullable(),
   prUrl: z.string().nullable(),
   prState: z.string().nullable(),
   branch: z.string().nullable(),
@@ -128,6 +135,64 @@ export const CommentRequest = z.object({
   body: z.string().trim().min(1).max(40_000),
 });
 export type CommentRequest = z.infer<typeof CommentRequest>;
+
+export const ApproveTaskRequest = z.object({
+  /** What was checked, posted with the approval. */
+  summary: z.string().trim().max(4000).optional(),
+});
+export type ApproveTaskRequest = z.infer<typeof ApproveTaskRequest>;
+
+export const EffortLevel = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type EffortLevel = z.infer<typeof EffortLevel>;
+
+/** How a run's model and effort were chosen. */
+export const RouteSource = z.enum([
+  /** Laya picked them with enough confidence. */
+  "laya",
+  /** Laya was unsure or unreachable, so the run uses Opus 5.5 at high effort. */
+  "fallback",
+  /** No router is configured; the agent's own model and effort apply. */
+  "agent",
+]);
+export type RouteSource = z.infer<typeof RouteSource>;
+
+/** The supervisor records each work or review session it starts on a task. */
+export const RecordRunRequest = z.object({
+  kind: z.enum(["task", "review"]),
+  model: z.string().min(1).max(100),
+  effort: EffortLevel,
+  router: RouteSource,
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  reason: z.string().max(500).optional(),
+  /** How many memory facts the model proxy added to the session. */
+  memory: z.number().int().min(0).optional(),
+});
+export type RecordRunRequest = z.infer<typeof RecordRunRequest>;
+
+// ---- Memory
+
+export const MemoryScope = z.enum(["agent", "project"]);
+export type MemoryScope = z.infer<typeof MemoryScope>;
+
+/** Something an agent learned and keeps across tasks. */
+export const MemoryFactDto = z.object({
+  id: z.string(),
+  content: z.string(),
+  /** agent: only its owner sees it; project: every agent on the project. */
+  scope: MemoryScope,
+  source: z.string(),
+  agent: z.object({ id: z.string(), name: z.string(), handle: z.string() }),
+  useCount: z.number(),
+  lastUsedAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type MemoryFactDto = z.infer<typeof MemoryFactDto>;
+
+export const RememberRequest = z.object({
+  content: z.string().trim().min(3).max(500),
+  scope: MemoryScope.optional(),
+});
+export type RememberRequest = z.infer<typeof RememberRequest>;
 
 // ---- Chat
 
@@ -180,6 +245,8 @@ export const PersonDto = z.object({
   status: AgentStatus.nullable(),
   statusText: z.string(),
   projectId: z.string().nullable(),
+  /** Agents only: paused with /pause. */
+  paused: z.boolean(),
 });
 export type PersonDto = z.infer<typeof PersonDto>;
 
@@ -238,6 +305,8 @@ export const MeDto = z.object({
   effort: z.string().nullable(),
   systemPrompt: z.string().nullable(),
   rolePrompt: z.string().nullable(),
+  /** Agents only: paused with /pause. */
+  paused: z.boolean(),
 });
 export type MeDto = z.infer<typeof MeDto>;
 
@@ -261,7 +330,7 @@ export type PostMessageRequest = z.infer<typeof PostMessageRequest>;
 
 // ---- Inbox
 
-export const InboxKind = z.enum(["mention", "dm", "thread_reply", "task_assigned", "task_unblocked"]);
+export const InboxKind = z.enum(["mention", "dm", "thread_reply", "task_assigned", "task_unblocked", "review_requested", "bug_filed"]);
 export type InboxKind = z.infer<typeof InboxKind>;
 
 export const InboxItemDto = z.object({
@@ -320,12 +389,10 @@ export function parseMentions(body: string): string[] {
 
 // ---- Worker protocol: supervisor ↔ the worker inside an agent's laptop, over WebSocket
 
-export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
-
 export interface WorkerRunCommand {
   type: "run";
   runId: string;
-  kind: "reply" | "task";
+  kind: "reply" | "task" | "review";
   prompt: string;
   /** Appended to Claude Code's own system prompt. */
   systemPrompt: string;

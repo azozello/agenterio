@@ -9,7 +9,7 @@ import { useProjectTasks } from "@/lib/use-tasks";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./avatar";
 import { ProjectHeader } from "./project-header";
-import { PrBadge, PriorityBadge, STATUS_DOTS, TypeIcon, WaitingBadge } from "./task-badges";
+import { ApprovedBadge, PrBadge, PriorityBadge, STATUS_DOTS, TypeIcon, WaitingBadge } from "./task-badges";
 import { TasksEmpty } from "./tasks-empty";
 import { InlineError } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -111,9 +111,10 @@ function BoardCard({
         ) : (
           <span className="text-xs text-muted-foreground">Unassigned</span>
         )}
-        {task.prUrl && (
-          <span className="relative z-10 ml-auto">
-            <PrBadge url={task.prUrl} state={task.prState} />
+        {(task.approvedBy || task.prUrl) && (
+          <span className="relative z-10 ml-auto flex items-center gap-2">
+            {task.approvedBy && <ApprovedBadge by={task.approvedBy.name} />}
+            {task.prUrl && <PrBadge url={task.prUrl} state={task.prState} />}
           </span>
         )}
       </div>
@@ -226,7 +227,7 @@ export function Board({ project }: { project: ProjectDto }) {
       {tasks !== null && work.length === 0 && <TasksEmpty project={project} />}
 
       {work.length > 0 && (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="relative min-h-0 flex-1 overflow-auto">
           {swimlanes ? (
             <div className={cn(GRID, "px-4 pb-6")}>
               {STATUS_ORDER.map((s) => (

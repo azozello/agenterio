@@ -12,10 +12,10 @@ import {
   type TaskStatus,
   type UpdateTaskRequest,
 } from "@agentslack/shared";
-import { PRIORITIES, STATUS_ORDER, assignablePeople, parseLabels, taskPath } from "@/lib/tasks";
+import { PRIORITIES, STATUS_ORDER, assignablePeople, isReviewBug, parseLabels, taskPath } from "@/lib/tasks";
 import { formatWhen } from "@/lib/utils";
 import { useWorkspace } from "@/lib/workspace";
-import { PrBadge, StatusPill } from "./task-badges";
+import { ApprovedBadge, PrBadge, StatusPill } from "./task-badges";
 import { Input } from "./ui/input";
 import { Select } from "./ui/select";
 
@@ -116,6 +116,34 @@ export function TaskFields({
               </option>
             ))}
           </Select>
+        </Row>
+      )}
+
+      {!isFeature && (task.reviewer || task.status === "ready" || task.status === "in_review") && (
+        <Row label="Reviewer">
+          <span className={plain}>
+            {task.reviewer ? task.reviewer.name : <span className="text-muted-foreground">No tester on {project.key}</span>}
+            {task.approvedBy && task.approvedAt && (
+              <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <ApprovedBadge by={task.approvedBy.name} />
+                {task.approvedBy.id !== task.reviewer?.id && <span>by {task.approvedBy.name}</span>}
+                <span>· {formatWhen(task.approvedAt)}</span>
+              </span>
+            )}
+          </span>
+        </Row>
+      )}
+
+      {task.foundIn && (
+        <Row label="Found in">
+          <Link href={taskPath(project.id, task.foundIn.key)} className={`${plain} truncate hover:underline`}>
+            <span className="font-mono text-xs font-semibold text-muted-foreground">{task.foundIn.key}</span> {task.foundIn.title}
+          </Link>
+          {isReviewBug(task) && (
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Fixed on {task.foundIn.key}&apos;s branch; follows its assignee and status and closes when it merges.
+            </span>
+          )}
         </Row>
       )}
 

@@ -8,7 +8,18 @@ const STYLES: Record<AgentStatus, string> = {
   offline: "border-[1.5px] border-status-offline bg-transparent",
 };
 
-export function PresenceDot({ status, className }: { status: AgentStatus | null; className?: string }) {
+/** Presence of a person; a paused agent shows a pause sign instead of its status. */
+export function PresenceDot({ status, paused = false, className }: { status: AgentStatus | null; paused?: boolean; className?: string }) {
+  if (paused) {
+    return (
+      <span
+        role="img"
+        aria-label="paused"
+        title="paused"
+        className={cn("inline-block size-2 shrink-0 border-x-[2.5px] border-status-offline", className)}
+      />
+    );
+  }
   // Humans have no agent status; show them as present.
   const s = status ?? "working";
   return (

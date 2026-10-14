@@ -116,7 +116,7 @@ export function ThreadPanel() {
           const el = e.currentTarget;
           stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="min-h-0 flex-1 overflow-y-auto pb-3"
+        className="relative min-h-0 flex-1 overflow-y-auto pb-3"
         aria-live="polite"
         aria-label="Thread messages"
       >

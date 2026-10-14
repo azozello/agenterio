@@ -26,7 +26,7 @@ export function loadEnv(): Env {
     redisUrl: process.env.REDIS_URL ?? "redis://localhost:6380",
     eventStream: process.env.EVENT_STREAM ?? "agentslack:events",
     port: Number(process.env.API_PORT ?? 4000),
-    webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
+    webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:3002",
     secureCookies: process.env.NODE_ENV === "production",
     githubToken: process.env.GITHUB_TOKEN || null,
     prPollMs: Number(process.env.PR_POLL_MS ?? 30_000),

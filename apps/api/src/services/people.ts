@@ -32,9 +32,15 @@ function summarize(e: Event, channels: Map<string, ChannelInfo>): string {
       return `Updated ${task?.key ?? "a task"}`;
     }
     case "agent.updated": {
+      if (p.change === "paused") return "Paused";
+      if (p.change === "resumed") return "Resumed";
       const person = p.person as { status?: string; statusText?: string } | undefined;
       return person?.statusText ? `Status: ${person.statusText}` : `Went ${person?.status ?? "idle"}`;
     }
+    case "memory.saved":
+      return `Learned ${String(p.count)} fact${p.count === 1 ? "" : "s"} (${String(p.source)})`;
+    case "task.run_started":
+      return `Started ${p.kind === "review" ? "reviewing" : "working on"} ${String(p.key)} (${String(p.model)}, ${String(p.effort)})`;
     default:
       return e.type;
   }
@@ -86,7 +92,12 @@ export async function getProfile(ctx: AppContext, actor: Actor, personId: string
 
   const currentTask = agent
     ? await ctx.db.task.findFirst({
-        where: { assigneeAgentId: agent.id, status: { in: ["in_progress", "blocked", "ready", "in_review"] } },
+        where: {
+          OR: [
+            { assigneeAgentId: agent.id, status: { in: ["in_progress", "blocked", "ready", "in_review"] } },
+            { reviewerAgentId: agent.id, status: { in: ["ready", "in_review"] }, approvedAt: null },
+          ],
+        },
         orderBy: { updatedAt: "desc" },
         include: { project: true },
       })

@@ -3,8 +3,11 @@ import type {
   DmDto,
   InboxItemDto,
   MeDto,
+  MemoryFactDto,
+  MemoryScope,
   MessageDto,
   PersonDto,
+  RecordRunRequest,
   TaskDto,
   ThreadDto,
   UpdateTaskRequest,
@@ -61,6 +64,10 @@ export class AgentSlackApi {
   createTask = (projectId: string, input: CreateTaskRequest) => this.request<TaskDto>("POST", `/projects/${projectId}/tasks`, input);
   updateTask = (ref: string, input: UpdateTaskRequest) => this.request<TaskDto>("PATCH", `/tasks/${encodeURIComponent(ref)}`, input);
   comment = (ref: string, body: string) => this.request<MessageDto>("POST", `/tasks/${encodeURIComponent(ref)}/comments`, { body });
+  approve = (ref: string, summary?: string) => this.request<TaskDto>("POST", `/tasks/${encodeURIComponent(ref)}/approve`, { summary });
+  recordRun = (ref: string, run: RecordRunRequest) => this.request<{ ok: true }>("POST", `/tasks/${encodeURIComponent(ref)}/runs`, run);
+  remember = (content: string, scope?: MemoryScope) => this.request<MemoryFactDto[]>("POST", "/memory", { content, scope });
+  recall = (q: string, limit = 8) => this.request<MemoryFactDto[]>("GET", `/memory?q=${encodeURIComponent(q)}&limit=${limit}`);
   inbox = () => this.request<InboxItemDto[]>("GET", "/inbox");
   ack = (ids: string[]) => this.request<{ acknowledged: number }>("POST", "/inbox/ack", { ids });
 }

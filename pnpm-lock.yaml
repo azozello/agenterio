@@ -66,6 +66,9 @@ importers:
       '@agentslack/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@anthropic-ai/sdk':
+        specifier: 0.133.0
+        version: 0.133.0(zod@4.6.7)
       dockerode:
         specifier: 4.0.12
         version: 4.0.12
@@ -75,6 +78,9 @@ importers:
       ws:
         specifier: 8.22.0
         version: 8.22.0
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/dockerode':
         specifier: 4.0.2

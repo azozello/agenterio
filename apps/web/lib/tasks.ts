@@ -7,8 +7,16 @@ export const PRIORITIES: TaskPriority[] = ["P0", "P1", "P2", "P3"];
 
 export const TYPE_LABELS: Record<TaskType, string> = { feature: "Feature", task: "Task", bug: "Bug" };
 
-/** Statuses that wait on you: a PR to review or merge, or a blocked task. */
-export const NEEDS_YOU: ReadonlySet<TaskStatus> = new Set(["ready", "blocked"]);
+/** A bug found in a task that is still open: it is fixed through that task and follows its status. */
+export const isReviewBug = (t: TaskDto) => t.type === "bug" && t.foundIn !== null && t.foundIn.status !== "done";
+
+/** Waits on you: an approved PR to merge, a Ready task no tester can review, or a blocked task. */
+export function needsYou(t: TaskDto): boolean {
+  if (t.type === "feature" || isReviewBug(t)) return false;
+  if (t.status === "blocked") return true;
+  if (t.status === "ready" || t.status === "in_review") return t.approvedAt !== null || (t.status === "ready" && t.reviewer === null);
+  return false;
+}
 
 export function byRank(a: TaskDto, b: TaskDto) {
   return a.rank - b.rank || a.number - b.number;
@@ -26,16 +34,20 @@ function patchRefs(refs: TaskRefDto[], changed: TaskDto): TaskRefDto[] {
   return refs.map((r) => (r.id === changed.id ? { ...r, title: changed.title, status: changed.status } : r));
 }
 
-/** Refreshes the status and title of `changed` wherever `task` refers to it (deps, children, bugs, parent). */
+/** Refreshes the status and title of `changed` wherever `task` refers to it (deps, children, bugs, parent, found-in). */
 export function withChangedRef(task: TaskDto, changed: TaskDto): TaskDto {
   const dependsOn = patchRefs(task.dependsOn, changed);
   const children = patchRefs(task.children, changed);
   const bugs = patchRefs(task.bugs, changed);
-  const parent =
-    task.parent?.id === changed.id ? { ...task.parent, title: changed.title, status: changed.status } : task.parent;
-  if (dependsOn === task.dependsOn && children === task.children && bugs === task.bugs && parent === task.parent) return task;
+  const patch = <R extends TaskRefDto | null>(ref: R): R =>
+    ref?.id === changed.id ? ({ ...ref, title: changed.title, status: changed.status } as R) : ref;
+  const parent = patch(task.parent);
+  const foundIn = patch(task.foundIn);
+  if (dependsOn === task.dependsOn && children === task.children && bugs === task.bugs && parent === task.parent && foundIn === task.foundIn) {
+    return task;
+  }
   const blockedBy = dependsOn === task.dependsOn ? task.blockedBy : dependsOn.filter((d) => d.status !== "done").map((d) => d.key);
-  return { ...task, dependsOn, children, bugs, parent, blockedBy };
+  return { ...task, dependsOn, children, bugs, parent, foundIn, blockedBy };
 }
 
 /** Applies a `task.changed` to a project's list: the task itself and every reference to it. */

@@ -12,9 +12,13 @@ import type {
 import { canAccessChannel } from "./auth/access.js";
 import { actorId, resolveActor, type Actor } from "./auth/actor.js";
 import type { AppContext } from "./context.js";
+import { markAgentOffline } from "./services/agents.js";
 import { isUuid } from "./services/errors.js";
 
 type SocketData = { actor: Actor };
+
+/** How long an agent may be without a socket (e.g. a supervisor restart) before it shows as offline. */
+const OFFLINE_GRACE_MS = 10_000;
 
 /**
  * Socket.IO gateway. Browsers authenticate with the session cookie, agents with
@@ -46,9 +50,31 @@ export async function attachRealtime(httpServer: HttpServer, ctx: AppContext) {
     }
   });
 
+  // Presence: an agent is online while its supervisor holds a socket.
+  const agentSockets = new Map<string, number>();
+  const offlineTimers = new Map<string, NodeJS.Timeout>();
+
   io.on("connection", (socket) => {
     const actor = socket.data.actor;
     void socket.join([`workspace:${actor.workspaceId}`, `person:${actorId(actor)}`]);
+    if (actor.kind === "agent") {
+      const id = actor.agentId;
+      agentSockets.set(id, (agentSockets.get(id) ?? 0) + 1);
+      clearTimeout(offlineTimers.get(id));
+      offlineTimers.delete(id);
+      socket.on("disconnect", () => {
+        const left = (agentSockets.get(id) ?? 1) - 1;
+        if (left > 0) return void agentSockets.set(id, left);
+        agentSockets.delete(id);
+        offlineTimers.set(
+          id,
+          setTimeout(() => {
+            offlineTimers.delete(id);
+            markAgentOffline(ctx, id).catch((err: unknown) => console.error("[realtime] marking offline failed", err));
+          }, OFFLINE_GRACE_MS),
+        );
+      });
+    }
     const projects =
       actor.kind === "agent"
         ? Promise.resolve([actor.projectId])
@@ -113,6 +139,8 @@ export async function attachRealtime(httpServer: HttpServer, ctx: AppContext) {
     io,
     /** Also closes the HTTP server. */
     close: async () => {
+      for (const timer of offlineTimers.values()) clearTimeout(timer);
+      offlineTimers.clear();
       await unsubscribe();
       await io.close();
     },

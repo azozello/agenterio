@@ -277,7 +277,7 @@ export function TaskDetail({ project, taskKey }: { project: ProjectDto; taskKey:
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ProjectHeader project={project} current={null} />
-      <div className="@container min-h-0 flex-1 overflow-y-auto">
+      <div className="@container relative min-h-0 flex-1 overflow-y-auto">
         {saveError && (
           <div className="sticky top-0 z-10 mx-auto max-w-6xl bg-background px-5 pt-3">
             <InlineError message={`Couldn't save ${task.key}: ${saveError}`} onDismiss={() => setSaveError(null)} />

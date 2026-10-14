@@ -12,9 +12,11 @@
   "dependencies": {
     "@agentslack/client": "workspace:*",
     "@agentslack/shared": "workspace:*",
+    "@anthropic-ai/sdk": "0.133.0",
     "dockerode": "4.0.12",
     "socket.io-client": "4.8.4",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/dockerode": "4.0.2",

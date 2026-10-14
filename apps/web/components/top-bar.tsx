@@ -6,7 +6,7 @@ import { Bell, Search } from "lucide-react";
 import type { TaskDto } from "@agentslack/shared";
 import { api, errorMessage } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
-import { NEEDS_YOU } from "@/lib/tasks";
+import { needsYou } from "@/lib/tasks";
 import { useTaskChanged } from "@/lib/use-tasks";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/lib/workspace";
@@ -15,7 +15,7 @@ import { useWorkspace } from "@/lib/workspace";
 type Waiting = Map<string, string>;
 
 function withTask(waiting: Waiting, t: TaskDto): Waiting {
-  const needs = t.type !== "feature" && NEEDS_YOU.has(t.status);
+  const needs = needsYou(t);
   if (needs === waiting.has(t.id)) return waiting;
   const next = new Map(waiting);
   if (needs) next.set(t.id, t.projectId);
@@ -23,7 +23,7 @@ function withTask(waiting: Waiting, t: TaskDto): Waiting {
   return next;
 }
 
-/** Tasks that wait on you (Ready for review/merge, or Blocked) across every project you can see. */
+/** Tasks that wait on you (approved and ready to merge, no tester to review, or Blocked) across every project you can see. */
 function useNeedsYou() {
   const { workspace } = useWorkspace();
   const [waiting, setWaiting] = useState<Waiting>(new Map());
@@ -104,7 +104,7 @@ export function TopBar() {
                 ? "bg-status-blocked/25 text-foreground hover:bg-status-blocked/35"
                 : "bg-muted text-muted-foreground hover:text-foreground",
           )}
-          title={error ? `Couldn't count tasks: ${error}` : "Tasks Ready for your review or merge, and blocked tasks"}
+          title={error ? `Couldn't count tasks: ${error}` : "Approved PRs to merge, Ready tasks without a tester, and blocked tasks"}
           aria-label={error ? "Needs you: couldn't count tasks" : `Needs you: ${needsYou} tasks. Open the board`}
         >
           Needs you · {error ? "!" : needsYou}

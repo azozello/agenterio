@@ -65,8 +65,11 @@ const task = (t: TaskDto) => ({
   waiting_on: t.blockedBy,
   tasks: t.children.map((c) => `${c.key} [${c.status}] ${c.title}`),
   bugs: t.bugs.map((b) => `${b.key} [${b.status}] ${b.title}`),
+  found_in: t.foundIn ? `${t.foundIn.key} [${t.foundIn.status}] ${t.foundIn.title}` : null,
   pr: t.prUrl ? `${t.prUrl} (${t.prState})` : null,
   branch: t.branch,
+  reviewer: t.reviewer ? (t.reviewer.handle ? `@${t.reviewer.handle}` : t.reviewer.name) : null,
+  approved_by: t.approvedBy ? (t.approvedBy.handle ? `@${t.approvedBy.handle}` : t.approvedBy.name) : null,
   description: t.description,
 });
 
@@ -162,21 +165,25 @@ export function agentslackServer(apiUrl: string, token: string, projectId: strin
     ),
     define(
       "list_tasks",
-      "List tasks on your project's board in backlog order. Filter by status, type, or assignee (\"me\" or a @handle).",
+      "List tasks on your project's board in backlog order. Filter by status, type, assignee or reviewer (\"me\" or a @handle).",
       {
         status: z.enum(["backlog", "in_progress", "blocked", "ready", "in_review", "done"]).optional(),
         type: z.enum(["feature", "task", "bug"]).optional(),
         assignee: z.string().optional(),
+        reviewer: z.string().optional().describe('"me" or a tester\'s @handle'),
       },
-      wrap(async ({ status, type, assignee }) => {
-        const assigneeId = !assignee || assignee === "me" ? assignee : (await findPerson(assignee)).id;
-        return (await api.tasks(projectId, { status, type, assignee: assigneeId })).map((t) => ({
+      wrap(async ({ status, type, assignee, reviewer }) => {
+        const idOf = async (ref?: string) => (!ref || ref === "me" ? ref : (await findPerson(ref)).id);
+        return (await api.tasks(projectId, { status, type, assignee: await idOf(assignee), reviewer: await idOf(reviewer) })).map((t) => ({
           key: t.key,
           type: t.type,
           status: t.status,
           title: t.title,
           assignee: t.assignee ? (t.assignee.handle ? `@${t.assignee.handle}` : t.assignee.name) : null,
+          reviewer: t.reviewer?.handle ? `@${t.reviewer.handle}` : null,
+          approved: t.approvedAt !== null,
           feature: t.parent?.key ?? null,
+          found_in: t.foundIn?.key ?? null,
           waiting_on: t.blockedBy,
         }));
       }),
@@ -222,7 +229,7 @@ export function agentslackServer(apiUrl: string, token: string, projectId: strin
     ),
     define(
       "update_task",
-      "Update a task: move its status (your role decides which moves are allowed), assign it (PM), link your PR and branch (assignee), or edit fields.",
+      "Update a task: move its status (your role decides which moves are allowed), assign it (PM), link your PR and branch (assignee), or edit fields. A bug found in an open task follows that task: assigning the bug assigns the task too, and its status moves with the task's.",
       {
         ref: z.string().describe("Task key like DEMO-3"),
         status: z.enum(["backlog", "in_progress", "blocked", "ready", "in_review", "done"]).optional(),
@@ -250,6 +257,33 @@ export function agentslackServer(apiUrl: string, token: string, projectId: strin
           }),
         ),
       ),
+    ),
+    define(
+      "approve_task",
+      "Tester: approve the PR of a task you are reviewing (it must be in_review). Records the approval on the task and posts your summary in its thread; the human then merges.",
+      {
+        ref: z.string().describe("Task key like DEMO-3"),
+        summary: z.string().min(1).describe("What you checked and how: tests run, scenarios tried, acceptance criteria met"),
+      },
+      wrap(async ({ ref, summary }) => task(await api.approve(ref, summary))),
+    ),
+    define(
+      "remember",
+      "Save a durable fact to your long-term memory so it comes back in later sessions: how the repo is laid out, a command that works, a convention or preference someone stated, a gotcha and its fix. Not task status, and never secrets.",
+      {
+        fact: z.string().min(3).max(500).describe("One self-contained sentence"),
+        scope: z.enum(["agent", "project"]).optional().describe("project: useful to every teammate on the project; agent (default): just you"),
+      },
+      wrap(async ({ fact, scope }) => {
+        const saved = await api.remember(fact, scope);
+        return saved.length ? { saved: saved[0]!.content } : { saved: null, note: "already known" };
+      }),
+    ),
+    define(
+      "recall",
+      "Search your long-term memory (your facts plus your project's shared ones). The most relevant facts are also added to each session automatically.",
+      { query: z.string().min(1).describe("What you want to know"), limit: z.number().int().min(1).max(30).optional() },
+      wrap(async ({ query, limit }) => (await api.recall(query, limit)).map((f) => ({ fact: f.content, scope: f.scope, from: f.agent.handle, source: f.source }))),
     ),
     define(
       "comment_on_task",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InboxItemDto, MeDto, MessageDto, ProjectDto, TaskDto, WorkspaceDto } from "@agentslack/shared";
-import { replyPrompt, systemPrompt, taskPrompt } from "../src/prompts.js";
+import { pausedReply, replyPrompt, reviewPrompt, systemPrompt, taskPrompt } from "../src/prompts.js";
 
 const me: MeDto = {
   kind: "agent",
@@ -14,6 +14,7 @@ const me: MeDto = {
   effort: "high",
   systemPrompt: "",
   rolePrompt: "## Your role: PM",
+  paused: false,
 };
 
 const project: ProjectDto = {
@@ -30,10 +31,10 @@ const ws: WorkspaceDto = {
   channels: [{ id: "c-ann", name: "announcements", projectId: null, kind: "channel", topic: "" }],
   projects: [project],
   people: [
-    { kind: "human", id: "u", name: "Denys", handle: null, role: "Admin", status: null, statusText: "", projectId: null },
-    { kind: "agent", id: "a-rowan", name: "Rowan", handle: "rowan", role: "PM", status: "idle", statusText: "", projectId: "p" },
-    { kind: "agent", id: "a-mira", name: "Mira", handle: "mira", role: "Engineer", status: "idle", statusText: "", projectId: "p" },
-    { kind: "agent", id: "a-kai", name: "Kai", handle: "kai", role: "Tester", status: "idle", statusText: "", projectId: "other" },
+    { kind: "human", id: "u", name: "Denys", handle: null, role: "Admin", status: null, statusText: "", projectId: null, paused: false },
+    { kind: "agent", id: "a-rowan", name: "Rowan", handle: "rowan", role: "PM", status: "idle", statusText: "", projectId: "p", paused: false },
+    { kind: "agent", id: "a-mira", name: "Mira", handle: "mira", role: "Engineer", status: "idle", statusText: "", projectId: "p", paused: false },
+    { kind: "agent", id: "a-kai", name: "Kai", handle: "kai", role: "Tester", status: "idle", statusText: "", projectId: "other", paused: false },
   ],
   dms: [],
 };
@@ -98,5 +99,58 @@ describe("prompts", () => {
     expect(prompt).toContain("Feature: DEMO-1 Greeter");
     expect(prompt).toContain("Denys (human): Token fixed");
     expect(prompt).toContain("New replies: token fixed");
+  });
+
+  const sentBack = {
+    key: "DEMO-2",
+    type: "task",
+    priority: "P2",
+    estimate: "S",
+    title: "Greet CLI",
+    parent: { key: "DEMO-1", title: "Greeter" },
+    dependsOn: [],
+    bugs: [{ id: "b", key: "DEMO-5", title: "Empty name prints Hello, !", type: "bug", status: "backlog" }],
+    foundIn: null,
+    reviewer: { kind: "agent", id: "a-juno", name: "Juno", handle: "juno" },
+    branch: "agent/mira/DEMO-2-greet",
+    prUrl: "https://github.com/acme/app/pull/3",
+    prState: "open",
+    description: "Build it",
+  } as unknown as TaskDto;
+
+  it("tells an engineer to fix review bugs on the task's own branch and PR", () => {
+    const prompt = taskPrompt(me, sentBack, []);
+    expect(prompt).toContain("Bugs found in it: DEMO-5 [backlog] Empty name prints Hello, !");
+    expect(prompt).toContain("fix it on this task's existing branch and PR (no new branch or PR)");
+    expect(prompt).toContain("Juno will re-review it");
+  });
+
+  it("asks a tester for exactly one verdict, and to re-check earlier bugs", () => {
+    const prompt = reviewPrompt({ ...me, name: "Juno", handle: "juno", role: "Tester" }, sentBack, []);
+    expect(prompt).toContain("Review DEMO-2 now");
+    expect(prompt).toContain("This is a re-review. Check first that each bug found earlier is fixed: DEMO-5 Empty name prints Hello, !");
+    expect(prompt).toContain('create_task(type="bug", parent="DEMO-1", found_in="DEMO-2")');
+    expect(prompt).toContain("Never merge the PR");
+  });
+
+  it("asks the PM to assign a filed bug", () => {
+    const item: InboxItemDto = {
+      id: "i2",
+      kind: "bug_filed",
+      createdAt: "",
+      message: message({ id: "root", channelId: "c-general", body: "Created bug DEMO-5: Empty name", author: { kind: "agent", id: "a-juno", name: "Juno", handle: "juno" } }),
+      channel: { id: "c-general", name: "general", projectId: "p", kind: "channel", topic: "" },
+      task: { id: "b", key: "DEMO-5", title: "Empty name", type: "bug", status: "backlog" },
+    };
+    const prompt = replyPrompt(me, [{ title: "#general, task DEMO-5", items: [item], context: [] }]);
+    expect(prompt).toContain("(bug_filed) Juno (@juno) filed bug DEMO-5: Empty name. Its thread root is message root.");
+    expect(prompt).toContain("assign the bug with update_task");
+  });
+
+  it("answers a human while paused without running a model", () => {
+    expect(pausedReply("Working on DEMO-2: Greet CLI", "DEMO-2")).toBe(
+      "I'm paused right now, so I'm not working on anything. The last thing I was doing: Working on DEMO-2: Greet CLI. I'll pick your message up once I'm resumed.",
+    );
+    expect(pausedReply("", null)).toBe("I'm paused right now, so I'm not working on anything. I'll pick your message up once I'm resumed.");
   });
 });

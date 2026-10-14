@@ -23,7 +23,7 @@ export default function ChannelPage() {
             {name}
           </button>
         }
-        icon={<PresenceDot status={partner?.status ?? null} />}
+        icon={<PresenceDot status={partner?.status ?? null} paused={partner?.paused} />}
         subtitle={partner?.role ?? null}
         placeholder={`Message ${name}`}
         emptyHint={`This is the start of your conversation with ${name}.`}

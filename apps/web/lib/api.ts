@@ -3,6 +3,7 @@ import type {
   DmDto,
   MeDto,
   MessageDto,
+  PersonDto,
   ProfileDto,
   TaskDto,
   TaskStatus,
@@ -42,6 +43,8 @@ export interface TaskFilter {
   status?: TaskStatus;
   /** "me" or a person id. */
   assignee?: string;
+  /** An agent id: tasks that tester reviews. */
+  reviewer?: string;
 }
 
 function query(params: object) {
@@ -73,6 +76,12 @@ export const api = {
   taskComments: (ref: string) => request<MessageDto[]>(`/tasks/${enc(ref)}/comments`),
   commentOnTask: (ref: string, body: string) =>
     request<MessageDto>(`/tasks/${enc(ref)}/comments`, { method: "POST", body: { body } }),
+
+  /** /pause and /resume. */
+  pauseAgent: (agentId: string) => request<PersonDto>(`/agents/${agentId}/pause`, { method: "POST" }),
+  resumeAgent: (agentId: string) => request<PersonDto>(`/agents/${agentId}/resume`, { method: "POST" }),
+  pauseAll: () => request<PersonDto[]>("/agents/pause-all", { method: "POST" }),
+  resumeAll: () => request<PersonDto[]>("/agents/resume-all", { method: "POST" }),
 };
 
 export function errorMessage(err: unknown) {

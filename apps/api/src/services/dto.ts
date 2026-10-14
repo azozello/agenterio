@@ -35,6 +35,7 @@ export const toHumanPerson = (u: User): PersonDto => ({
   status: null,
   statusText: "",
   projectId: null,
+  paused: false,
 });
 
 export const toAgentPerson = (a: Agent & { role: Role }): PersonDto => ({
@@ -46,9 +47,10 @@ export const toAgentPerson = (a: Agent & { role: Role }): PersonDto => ({
   status: a.status,
   statusText: a.statusText,
   projectId: a.currentProjectId,
+  paused: a.pausedAt !== null,
 });
 
-const HUMAN_ONLY = { handle: null, role: null, model: null, effort: null, systemPrompt: null, rolePrompt: null };
+const HUMAN_ONLY = { handle: null, role: null, model: null, effort: null, systemPrompt: null, rolePrompt: null, paused: false };
 
 export function toHumanMe(u: { id: string; name: string; workspaceId: string }): MeDto {
   return { kind: "human", id: u.id, name: u.name, workspaceId: u.workspaceId, projectId: null, ...HUMAN_ONLY };
@@ -70,5 +72,6 @@ export async function loadMe(ctx: AppContext, actor: Actor): Promise<MeDto> {
     effort: agent.effort,
     systemPrompt: agent.systemPrompt,
     rolePrompt: agent.role.basePrompt,
+    paused: agent.pausedAt !== null,
   };
 }

@@ -1,4 +1,14 @@
-import { Bug, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Hourglass, Layers, SquareCheck } from "lucide-react";
+import {
+  Bug,
+  CircleCheck,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  Hourglass,
+  Layers,
+  SquareCheck,
+} from "lucide-react";
 import { TASK_STATUS_LABELS, type TaskPriority, type TaskStatus, type TaskType } from "@agentslack/shared";
 import { TYPE_LABELS } from "@/lib/tasks";
 import { cn } from "@/lib/utils";
@@ -101,6 +111,19 @@ export function PrBadge({ url, state, compact = false }: { url: string; state: s
       <Icon className="size-3.5" aria-hidden />
       {compact ? <span className="sr-only">Pull request {s.label}</span> : <span>PR {s.label.toLowerCase()}</span>}
     </a>
+  );
+}
+
+/** The reviewer approved the PR; it waits for your merge. */
+export function ApprovedBadge({ by }: { by: string }) {
+  return (
+    <span
+      title={`Approved by ${by}: ready to merge`}
+      className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+    >
+      <CircleCheck className="size-3.5" aria-hidden />
+      <span>Approved</span>
+    </span>
   );
 }
 

@@ -175,7 +175,7 @@ export function Backlog({ project }: { project: ProjectDto }) {
       {tasks?.length === 0 && <TasksEmpty project={project} onNewFeature={() => setIntent({ type: "feature" })} />}
 
       {tasks && tasks.length > 0 && (
-        <div className="@container min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="@container relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div className="mx-auto max-w-5xl space-y-3">
             {features.map((f, fi) => {
               const children = childrenOf(f.id);

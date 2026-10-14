@@ -4,17 +4,21 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { createMiddleware } from "hono/factory";
 import {
+  ApproveTaskRequest,
   CommentRequest,
   CreateTaskRequest,
   DmDto,
   InboxItemDto,
   LoginRequest,
   MeDto,
+  MemoryFactDto,
   MessageDto,
   OpenDmRequest,
   PersonDto,
   PostMessageRequest,
   ProfileDto,
+  RecordRunRequest,
+  RememberRequest,
   SESSION_COOKIE,
   SetStatusRequest,
   TaskDto,
@@ -28,14 +32,24 @@ import { createSession, issueAgentToken, resolveActor, type Actor } from "./auth
 import { hashPassword, hashToken, verifyPassword } from "./auth/crypto.js";
 import type { AppContext } from "./context.js";
 import { internalRoutes } from "./internal.js";
-import { setAgentStatus } from "./services/agents.js";
+import { setAgentStatus, setPaused } from "./services/agents.js";
 import { openDm } from "./services/dms.js";
 import { loadMe, toHumanMe } from "./services/dto.js";
 import { isUuid, notFound, requireHuman } from "./services/errors.js";
 import { ackInbox, listInbox } from "./services/inbox.js";
+import { addFacts, deleteFact, listMemory, searchMemory } from "./services/memory.js";
 import { getThread, listChannelMessages, postChannelMessage } from "./services/messages.js";
 import { getProfile } from "./services/people.js";
-import { commentOnTask, createTask, getTask, listTaskComments, listTasks, updateTask } from "./services/tasks.js";
+import {
+  approveTask,
+  commentOnTask,
+  createTask,
+  getTask,
+  listTaskComments,
+  listTasks,
+  recordRun,
+  updateTask,
+} from "./services/tasks.js";
 import { getWorkspace } from "./services/workspace.js";
 
 type Vars = { Variables: { actor: Actor } };
@@ -239,6 +253,7 @@ export function createApp(ctx: AppContext) {
           type: TaskType.optional(),
           status: TaskStatus.optional(),
           assignee: z.string().optional().describe('"me" or a person id'),
+          reviewer: z.string().optional().describe('"me" or an agent id: tasks that tester reviews'),
         }),
       },
       responses: { 200: json(z.array(TaskDto), "Tasks in backlog order") },
@@ -303,6 +318,33 @@ export function createApp(ctx: AppContext) {
     async (c) => c.json(await commentOnTask(ctx, c.get("actor"), c.req.valid("param").ref, c.req.valid("json").body), 201),
   );
 
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/tasks/{ref}/approve",
+      tags: ["tasks"],
+      description: "The reviewing tester (or a human) approves the task's PR. The task then waits for your merge.",
+      request: { params: TaskParams, body: body(ApproveTaskRequest, "What was checked") },
+      responses: { 200: json(TaskDto, "The approved task") },
+    }),
+    async (c) => c.json(await approveTask(ctx, c.get("actor"), c.req.valid("param").ref, c.req.valid("json")), 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/tasks/{ref}/runs",
+      tags: ["tasks"],
+      description: "The supervisor records a work or review session: the model and effort it runs on, and how they were chosen.",
+      request: { params: TaskParams, body: body(RecordRunRequest, "The run") },
+      responses: { 201: json(z.object({ ok: z.literal(true) }), "Recorded in the task thread") },
+    }),
+    async (c) => {
+      await recordRun(ctx, c.get("actor"), c.req.valid("param").ref, c.req.valid("json"));
+      return c.json({ ok: true as const }, 201);
+    },
+  );
+
   // ---- Agents
 
   app.openapi(
@@ -347,6 +389,95 @@ export function createApp(ctx: AppContext) {
       return c.json({ token, projectId: agent.currentProjectId }, 201);
     },
   );
+
+  // ---- Memory
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/memory",
+      tags: ["memory"],
+      description: "The calling agent's facts most relevant to q (its own plus project-wide ones).",
+      request: { query: z.object({ q: z.string().max(4000).default(""), limit: z.coerce.number().int().min(1).max(30).default(8) }) },
+      responses: { 200: json(z.array(MemoryFactDto), "Facts, most relevant first") },
+    }),
+    async (c) => {
+      const actor = c.get("actor");
+      if (actor.kind !== "agent") throw new HTTPException(403, { message: "only agents have a memory to search" });
+      const { q, limit } = c.req.valid("query");
+      return c.json(await searchMemory(ctx.db, actor.agentId, q, limit), 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/memory",
+      tags: ["memory"],
+      description: "An agent saves a fact it wants to keep across tasks. Duplicates are skipped.",
+      request: { body: body(RememberRequest, "The fact") },
+      responses: { 201: json(z.array(MemoryFactDto), "The saved fact, or nothing if it was already known") },
+    }),
+    async (c) => {
+      const actor = c.get("actor");
+      if (actor.kind !== "agent") throw new HTTPException(403, { message: "only agents remember" });
+      const { content, scope } = c.req.valid("json");
+      return c.json(await addFacts(ctx, actor, actor.agentId, [{ content, scope }], "remember"), 201);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/people/{personId}/memory",
+      tags: ["memory"],
+      request: { params: z.object({ personId: z.string().uuid() }) },
+      responses: { 200: json(z.array(MemoryFactDto), "What the agent remembers, newest first") },
+    }),
+    async (c) => c.json(await listMemory(ctx, c.get("actor"), c.req.valid("param").personId), 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/memory/{factId}",
+      tags: ["memory"],
+      request: { params: z.object({ factId: z.string().uuid() }) },
+      responses: { 204: { description: "Forgotten" } },
+    }),
+    async (c) => {
+      await deleteFact(ctx, c.get("actor"), c.req.valid("param").factId);
+      return c.body(null, 204);
+    },
+  );
+
+  // /pause and /resume. The "all" routes come first so "pause-all" is never read as an agent id.
+  for (const action of ["pause", "resume"] as const) {
+    app.openapi(
+      createRoute({
+        method: "post",
+        path: `/agents/${action}-all`,
+        tags: ["agents"],
+        description: action === "pause" ? "Pauses every agent (/pause all)." : "Resumes every paused agent (/resume all).",
+        responses: { 200: json(z.array(PersonDto), "Agents whose state changed") },
+      }),
+      async (c) => c.json(await setPaused(ctx, c.get("actor"), null, action === "pause"), 200),
+    );
+    app.openapi(
+      createRoute({
+        method: "post",
+        path: `/agents/{agentId}/${action}`,
+        tags: ["agents"],
+        description:
+          action === "pause"
+            ? "Stops the agent's run after the current tool call and its laptop; it takes no new work until resumed."
+            : "Lets a paused agent pick its work up again.",
+        request: { params: z.object({ agentId: z.string().uuid() }) },
+        responses: { 200: json(PersonDto, "The agent") },
+      }),
+      async (c) => c.json((await setPaused(ctx, c.get("actor"), c.req.valid("param").agentId, action === "pause"))[0]!, 200),
+    );
+  }
 
   return app;
 }

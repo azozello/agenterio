@@ -17,6 +17,8 @@ export interface Laptop {
 /** Where agents' laptops come from. Docker now; a VM provider can implement the same interface later. */
 export interface LaptopProvider {
   ensure(spec: LaptopSpec): Promise<Laptop>;
+  /** Stops the laptop but keeps it and its home volume; `ensure` starts it again. */
+  suspend(handle: string): Promise<void>;
   destroy(handle: string): Promise<void>;
 }
 
@@ -85,6 +87,16 @@ export class DockerLaptops implements LaptopProvider {
     if (!port) throw new Error(`laptop ${spec.handle} has no worker port`);
     await this.waitHealthy(`http://127.0.0.1:${port}/health`, spec.handle);
     return { containerId: info.Id, url: `ws://127.0.0.1:${port}`, secret: info.Config.Labels["agentslack.secret"]! };
+  }
+
+  async suspend(handle: string): Promise<void> {
+    await this.docker
+      .getContainer(containerName(handle))
+      .stop()
+      .catch((err: { statusCode?: number }) => {
+        // 304: already stopped; 404: never started.
+        if (err.statusCode !== 304 && err.statusCode !== 404) throw err;
+      });
   }
 
   async destroy(handle: string): Promise<void> {

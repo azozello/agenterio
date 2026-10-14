@@ -94,6 +94,10 @@ enum InboxKind {
   thread_reply
   task_assigned
   task_unblocked
+  // A task in Ready is waiting on this tester's review.
+  review_requested
+  // A bug was filed on the agent's project; the PM decides who fixes it.
+  bug_filed
 }
 
 model Workspace {
@@ -110,6 +114,7 @@ model Workspace {
   accessProfiles AccessProfile[]
   skills         Skill[]
   events         Event[]
+  memoryFacts    MemoryFact[]
 
   @@map("workspace")
 }
@@ -123,13 +128,14 @@ model User {
   isAdmin      Boolean  @default(false) @map("is_admin")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  workspace       Workspace        @relation(fields: [workspaceId], references: [id])
-  sessions        Session[]
-  memberships     ProjectMember[]
-  channelMembers  ChannelMember[]
-  messages        Message[]
-  assignedTasks   Task[]           @relation("TaskAssigneeUser")
-  specVersions    SpecVersion[]
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id])
+  sessions       Session[]
+  memberships    ProjectMember[]
+  channelMembers ChannelMember[]
+  messages       Message[]
+  assignedTasks  Task[]          @relation("TaskAssigneeUser")
+  approvedTasks  Task[]          @relation("TaskApprovedByUser")
+  specVersions   SpecVersion[]
 
   @@map("user")
 }
@@ -178,6 +184,8 @@ model Agent {
   status           AgentStatus @default(offline)
   statusText       String      @default("") @map("status_text")
   currentProjectId String?     @map("current_project_id") @db.Uuid
+  // Set by /pause: the loop takes no new work and the laptop is stopped until /resume.
+  pausedAt         DateTime?   @map("paused_at")
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
@@ -190,9 +198,12 @@ model Agent {
   channelMembers ChannelMember[]
   messages       Message[]
   assignedTasks  Task[]          @relation("TaskAssigneeAgent")
+  reviewTasks    Task[]          @relation("TaskReviewer")
+  approvedTasks  Task[]          @relation("TaskApprovedByAgent")
   skills         Skill[]
   specVersions   SpecVersion[]
   inboxItems     InboxItem[]
+  memoryFacts    MemoryFact[]
 
   @@unique([workspaceId, handle])
   @@map("agent")
@@ -226,16 +237,17 @@ model Project {
   taskCounter     Int         @default(0) @map("task_counter")
   createdAt       DateTime    @default(now()) @map("created_at")
 
-  workspace       Workspace       @relation(fields: [workspaceId], references: [id])
-  image           Image?          @relation(fields: [imageId], references: [id])
-  accessProfile   AccessProfile?  @relation(fields: [accessProfileId], references: [id])
-  members         ProjectMember[]
-  currentAgents   Agent[]         @relation("AgentCurrentProject")
-  agentTokens     AgentToken[]
-  channels        Channel[]
-  tasks           Task[]
-  specPages       SpecPage[]
-  laptops         Laptop[]
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id])
+  image         Image?          @relation(fields: [imageId], references: [id])
+  accessProfile AccessProfile?  @relation(fields: [accessProfileId], references: [id])
+  members       ProjectMember[]
+  currentAgents Agent[]         @relation("AgentCurrentProject")
+  agentTokens   AgentToken[]
+  channels      Channel[]
+  tasks         Task[]
+  specPages     SpecPage[]
+  laptops       Laptop[]
+  memoryFacts   MemoryFact[]
 
   @@unique([workspaceId, key])
   @@map("project")
@@ -372,42 +384,51 @@ model Message {
 }
 
 model Task {
-  id              String       @id @default(uuid(7)) @db.Uuid
-  projectId       String       @map("project_id") @db.Uuid
-  number          Int
-  type            TaskType
-  title           String
-  description     String       @default("")
-  status          TaskStatus   @default(backlog)
-  priority        TaskPriority @default(P2)
-  estimate        Estimate?
-  labels          String[]     @default([])
+  id                String       @id @default(uuid(7)) @db.Uuid
+  projectId         String       @map("project_id") @db.Uuid
+  number            Int
+  type              TaskType
+  title             String
+  description       String       @default("")
+  status            TaskStatus   @default(backlog)
+  priority          TaskPriority @default(P2)
+  estimate          Estimate?
+  labels            String[]     @default([])
   // Backlog order; lower comes first.
-  rank            Float        @default(0)
+  rank              Float        @default(0)
   // The feature a task or bug belongs to.
-  parentId        String?      @map("parent_id") @db.Uuid
-  assigneeUserId  String?      @map("assignee_user_id") @db.Uuid
-  assigneeAgentId String?      @map("assignee_agent_id") @db.Uuid
-  reporterUserId  String?      @map("reporter_user_id") @db.Uuid
-  reporterAgentId String?      @map("reporter_agent_id") @db.Uuid
+  parentId          String?      @map("parent_id") @db.Uuid
+  assigneeUserId    String?      @map("assignee_user_id") @db.Uuid
+  assigneeAgentId   String?      @map("assignee_agent_id") @db.Uuid
+  reporterUserId    String?      @map("reporter_user_id") @db.Uuid
+  reporterAgentId   String?      @map("reporter_agent_id") @db.Uuid
   // Thread root in the project's #general; status changes and comments are its replies.
-  threadMessageId String?      @unique @map("thread_message_id") @db.Uuid
+  threadMessageId   String?      @unique @map("thread_message_id") @db.Uuid
   // Git branch the assignee works on.
-  branch          String?
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
+  branch            String?
+  // Tester picked when the task reaches Ready; kept so re-reviews go to the same tester.
+  reviewerAgentId   String?      @map("reviewer_agent_id") @db.Uuid
+  // Approval of the current review round; cleared when the task leaves In review.
+  approvedAt        DateTime?    @map("approved_at")
+  approvedByAgentId String?      @map("approved_by_agent_id") @db.Uuid
+  approvedByUserId  String?      @map("approved_by_user_id") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
 
-  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  rootMessages  Message[]        @relation("TaskRootMessage")
-  inboxItems    InboxItem[]
-  parent        Task?            @relation("FeatureChildren", fields: [parentId], references: [id])
-  children      Task[]           @relation("FeatureChildren")
-  assigneeUser  User?            @relation("TaskAssigneeUser", fields: [assigneeUserId], references: [id])
-  assigneeAgent Agent?           @relation("TaskAssigneeAgent", fields: [assigneeAgentId], references: [id])
-  dependsOn     TaskDependency[] @relation("DependentTask")
-  dependents    TaskDependency[] @relation("DependencyTask")
-  links         TaskLink[]       @relation("LinkOwner")
-  linkedFrom    TaskLink[]       @relation("LinkedBug")
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rootMessages    Message[]        @relation("TaskRootMessage")
+  inboxItems      InboxItem[]
+  parent          Task?            @relation("FeatureChildren", fields: [parentId], references: [id])
+  children        Task[]           @relation("FeatureChildren")
+  assigneeUser    User?            @relation("TaskAssigneeUser", fields: [assigneeUserId], references: [id])
+  assigneeAgent   Agent?           @relation("TaskAssigneeAgent", fields: [assigneeAgentId], references: [id])
+  reviewer        Agent?           @relation("TaskReviewer", fields: [reviewerAgentId], references: [id])
+  approvedByAgent Agent?           @relation("TaskApprovedByAgent", fields: [approvedByAgentId], references: [id])
+  approvedByUser  User?            @relation("TaskApprovedByUser", fields: [approvedByUserId], references: [id])
+  dependsOn       TaskDependency[] @relation("DependentTask")
+  dependents      TaskDependency[] @relation("DependencyTask")
+  links           TaskLink[]       @relation("LinkOwner")
+  linkedFrom      TaskLink[]       @relation("LinkedBug")
 
   @@unique([projectId, number])
   @@index([projectId, status])
@@ -563,4 +584,36 @@ model InboxItem {
 
   @@index([agentId, handledAt, createdAt])
   @@map("inbox_item")
+}
+
+enum MemoryScope {
+  // Only the agent that learned it.
+  agent
+  // Every agent on the project.
+  project
+}
+
+// A fact an agent learned, kept across tasks and found by Postgres full-text search. The model
+// proxy adds the relevant ones to each session and extracts new ones when the session ends.
+model MemoryFact {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  workspaceId String      @map("workspace_id") @db.Uuid
+  // Who learned it.
+  agentId     String      @map("agent_id") @db.Uuid
+  projectId   String?     @map("project_id") @db.Uuid
+  scope       MemoryScope @default(agent)
+  content     String
+  // Where it came from, e.g. "DEMO-2 task session" or "remember".
+  source      String      @default("")
+  useCount    Int         @default(0) @map("use_count")
+  lastUsedAt  DateTime?   @map("last_used_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  agent     Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, createdAt])
+  @@index([projectId, scope])
+  @@map("memory_fact")
 }

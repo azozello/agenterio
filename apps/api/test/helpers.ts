@@ -117,6 +117,7 @@ export function api(base: string, auth: { cookie?: string; token?: string }) {
         headers: headers({ "content-type": "application/json" }),
         body: JSON.stringify(body),
       }),
+    delete: (path: string) => fetch(`${base}${path}`, { method: "DELETE", headers: headers() }),
   };
 }
 

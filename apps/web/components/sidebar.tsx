@@ -72,7 +72,7 @@ export function Sidebar() {
         <span className="truncate text-[15px] font-semibold text-white">{workspace.name}</span>
       </header>
 
-      <div className="flex-1 overflow-y-auto pb-4">
+      <div className="relative flex-1 overflow-y-auto pb-4">
         {workspace.channels.length > 0 && (
           <Section title="Workspace">
             {workspace.channels.map((c) => (
@@ -108,7 +108,7 @@ export function Sidebar() {
                     active ? "bg-sidebar-active font-medium text-white" : "text-sidebar-foreground/85 hover:bg-sidebar-hover",
                   )}
                 >
-                  <PresenceDot status={partner?.status ?? null} />
+                  <PresenceDot status={partner?.status ?? null} paused={partner?.paused} />
                   <span className="truncate">{partner?.name ?? "Direct message"}</span>
                 </Link>
               </li>
@@ -128,14 +128,18 @@ export function Sidebar() {
                   profileId === p.id ? "bg-sidebar-hover" : "hover:bg-sidebar-hover",
                 )}
               >
-                <PresenceDot status={p.status} className="mt-1.5" />
+                <PresenceDot status={p.status} paused={p.paused} className="mt-1.5" />
                 <div className="min-w-0">
                   <div className="truncate text-sm">
                     {p.name}
                     {p.id === me.id && <span className="ml-1 text-sidebar-muted">(you)</span>}
                     {p.role && <span className="ml-1.5 text-xs text-sidebar-muted">{p.role}</span>}
                   </div>
-                  {p.statusText && <div className="truncate text-xs text-sidebar-muted">{p.statusText}</div>}
+                  {(p.paused || p.statusText) && (
+                    <div className="truncate text-xs text-sidebar-muted">
+                      {p.paused ? `Paused${p.statusText ? ` · ${p.statusText}` : ""}` : p.statusText}
+                    </div>
+                  )}
                 </div>
               </button>
             </li>
